@@ -34,15 +34,9 @@ def init_database():
         CREATE TABLE encrypted_files (
             id INT AUTO_INCREMENT PRIMARY KEY,
             filename VARCHAR(255) NOT NULL UNIQUE,
-
-            enc_dek BLOB NOT NULL,        -- encrypted DEK
-            dek_iv VARBINARY(12) NOT NULL,
-
-            kek_salt VARBINARY(16) NOT NULL,
-
-            file_iv VARBINARY(12) NOT NULL,
-            file_tag VARBINARY(16) NOT NULL,
-
+            file JSON NOT NULL,         -- stores ciphertext, nonce, tag
+            enc_dek JSON NOT NULL,      -- stores ciphertext, nonce, tag
+            kek_salt VARCHAR(64) NOT NULL,  -- base64 string
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)

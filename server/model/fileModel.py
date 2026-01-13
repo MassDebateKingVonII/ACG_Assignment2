@@ -1,9 +1,6 @@
-import os, json
+import os, base64, json
 from server.config.db import get_db
-from server.utils.envelopeEncryption import (
-    encrypt_file_at_rest, 
-    decrypt_file_at_rest
-)
+from server.utils.envelopeEncryption import encrypt_file_at_rest, decrypt_file_at_rest
 
 SAVE_DIR = os.path.join('server_path', 'save')
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -12,10 +9,10 @@ os.makedirs(SAVE_DIR, exist_ok=True)
 def store_file(filename: str, plaintext_bytes: bytes):
     enc_data = encrypt_file_at_rest(plaintext_bytes)
 
-    # Save encrypted file
+    # Save encrypted file locally (optional; ciphertext is also in JSON)
     enc_path = os.path.join(SAVE_DIR, filename + ".enc")
     with open(enc_path, "wb") as f:
-        f.write(enc_data["ciphertext"])
+        f.write(base64.b64decode(enc_data["file"]["ciphertext"]))
 
     # Store metadata in DB
     db = get_db()
@@ -23,21 +20,18 @@ def store_file(filename: str, plaintext_bytes: bytes):
 
     cur.execute("""
         INSERT INTO encrypted_files
-        (filename, enc_dek, dek_iv, kek_salt, file_iv, file_tag)
-        VALUES (%s,%s,%s,%s,%s,%s)
+        (filename, file, enc_dek, kek_salt)
+        VALUES (%s,%s,%s,%s)
     """, (
         filename,
-        enc_data["enc_dek"],
-        enc_data["dek_iv"],
-        enc_data["kek_salt"],
-        enc_data["file_iv"],
-        enc_data["file_tag"]
+        json.dumps(enc_data["file"]),      # store AES dict as JSON
+        json.dumps(enc_data["enc_dek"]),   # store AES dict as JSON
+        enc_data["kek_salt"]               # base64 string
     ))
 
     db.commit()
     cur.close()
     db.close()
-
 
 def list_files():
     db = get_db()
@@ -65,18 +59,9 @@ def load_file(filename: str) -> bytes | None:
     if not row:
         return None
 
-    enc_path = os.path.join(SAVE_DIR, filename + ".enc")
-    if not os.path.exists(enc_path):
-        return None
-
-    with open(enc_path, "rb") as f:
-        ciphertext = f.read()
-
     record = {
-        "ciphertext": ciphertext,
-        "file_iv": row["file_iv"],
-        "enc_dek": row["enc_dek"],
-        "dek_iv": row["dek_iv"],
+        "file": json.loads(row["file"]),       # parse JSON dict
+        "enc_dek": json.loads(row["enc_dek"]), # parse JSON dict
         "kek_salt": row["kek_salt"]
     }
 

@@ -1,7 +1,8 @@
-import os, base64
+import os
+import base64
+from utils.AES_utils import encrypt_message, decrypt_message
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -23,40 +24,37 @@ def generate_dek():
     return os.urandom(32)
 
 def encrypt_dek(dek: bytes, kek: bytes):
-    aes = AESGCM(kek)
-    iv = os.urandom(12)
-    ct = aes.encrypt(iv, dek, None)
-    return iv, ct
+    return encrypt_message(dek, kek)
 
-def decrypt_dek(enc_dek: bytes, iv: bytes, kek: bytes):
-    aes = AESGCM(kek)
-    return aes.decrypt(iv, enc_dek, None)
+def decrypt_dek(enc_dict: dict, kek: bytes):
+    return decrypt_message(enc_dict, kek)
 
 # -------- FILE --------
 def encrypt_file_at_rest(plaintext: bytes):
+    # Generate DEK for file encryption
     dek = generate_dek()
 
-    file_iv = os.urandom(12)
-    aes_file = AESGCM(dek)
-    ciphertext = aes_file.encrypt(file_iv, plaintext, None)
+    # Encrypt file with DEK
+    enc_file = encrypt_message(plaintext, dek)
 
+    # Generate KEK and encrypt DEK
     salt = os.urandom(16)
     kek = derive_kek(salt)
-
-    dek_iv, enc_dek = encrypt_dek(dek, kek)
+    enc_dek = encrypt_dek(dek, kek)
 
     return {
-        "ciphertext": ciphertext,
-        "file_iv": file_iv,
-        "file_tag": ciphertext[-16:],
-        "enc_dek": enc_dek,
-        "dek_iv": dek_iv,
-        "kek_salt": salt
+        "file": enc_file,     # dict: ciphertext, nonce, tag
+        "enc_dek": enc_dek,   # dict: ciphertext, nonce, tag
+        "kek_salt": base64.b64encode(salt).decode()
     }
 
 def decrypt_file_at_rest(record):
-    kek = derive_kek(record["kek_salt"])
-    dek = decrypt_dek(record["enc_dek"], record["dek_iv"], kek)
+    # Re-derive KEK
+    salt = base64.b64decode(record["kek_salt"])
+    kek = derive_kek(salt)
 
-    aes = AESGCM(dek)
-    return aes.decrypt(record["file_iv"], record["ciphertext"], None)
+    # Decrypt DEK
+    dek = decrypt_dek(record["enc_dek"], kek)
+
+    # Decrypt file using DEK
+    return decrypt_message(record["file"], dek)
