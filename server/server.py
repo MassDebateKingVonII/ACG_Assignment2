@@ -10,7 +10,8 @@ from utils.ECDHE_utils import (
     derive_aes_key
 )
 
-from server.model.fileModel import store_file, list_files, load_file, rotate_master_key
+from server.model.fileModel import store_file, list_files, load_file
+from server.utils.rotateMEK import rotate_master_key
 
 HOST = '127.0.0.1'
 PORT = 5001
