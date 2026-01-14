@@ -7,33 +7,41 @@ from server.utils.envelopeEncryption import encrypt_file_at_rest, decrypt_file_a
 SAVE_DIR = os.path.join('server_path', 'save')
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-def store_file(filename: str, plaintext_bytes: bytes):
+import base64
+
+def store_file(filename: str, plaintext_bytes: bytes, signature: bytes):
+    # Encrypt file at rest (returns AES dict with ciphertext, nonce, tag)
     enc_data = encrypt_file_at_rest(plaintext_bytes)
 
-    # Save encrypted file locally (optional; ciphertext is also in JSON)
+    # Save the encrypted file to disk (binary)
     enc_path = os.path.join(SAVE_DIR, filename + ".enc")
     with open(enc_path, "wb") as f:
         f.write(base64.b64decode(enc_data["file"]["ciphertext"]))
 
-    db = get_db()  # get a connection from the pool
+    # Base64 encode signature for storage
+    signature_b64 = base64.b64encode(signature).decode()
+
+    # Save only metadata and encrypted DEK to database
+    db = get_db()
     try:
         with db.cursor() as cur:
             cur.execute("""
                 INSERT INTO encrypted_files
-                (filename, file, enc_dek, kek_salt)
-                VALUES (%s,%s,%s,%s)
+                (filename, file_nonce, file_tag, enc_dek, kek_salt, file_signature)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 filename,
-                json.dumps(enc_data["file"]),      # AES dict as JSON
-                json.dumps(enc_data["enc_dek"]),   # AES dict as JSON
-                enc_data["kek_salt"]               # base64 string
+                enc_data["file"]["nonce"],         # store nonce
+                enc_data["file"]["tag"],           # store GCM tag
+                json.dumps(enc_data["enc_dek"]),  # AES dict
+                enc_data["kek_salt"],             # base64 string
+                signature_b64,                     # file signature
             ))
-        
     finally:
         db.close()
      
 def list_files():
-    db = get_db()  # get a connection from the pool
+    db = get_db()
     try:
         with db.cursor() as cur:
             cur.execute("SELECT filename FROM encrypted_files ORDER BY created_at DESC")
@@ -42,8 +50,8 @@ def list_files():
     finally:
         db.close()
 
-def load_file(filename: str) -> bytes | None:
-    db = get_db()  # get a connection from the pool
+def load_file(filename: str) -> tuple[bytes, str] | None:
+    db = get_db()
     try:
         with db.cursor(dictionary=True) as cur:
             cur.execute("SELECT * FROM encrypted_files WHERE filename=%s", (filename,))
@@ -54,16 +62,33 @@ def load_file(filename: str) -> bytes | None:
     if not row:
         return None
 
+    # Load ciphertext from disk
+    enc_path = os.path.join(SAVE_DIR, filename + ".enc")
+    if not os.path.exists(enc_path):
+        return None
+
+    with open(enc_path, "rb") as f:
+        ciphertext_bytes = f.read()
+
+    # Reconstruct AES dict
+    enc_file_dict = {
+        "ciphertext": base64.b64encode(ciphertext_bytes).decode(),
+        "nonce": row["file_nonce"],
+        "tag": row["file_tag"]
+    }
+
     record = {
-        "file": json.loads(row["file"]),       # parse JSON dict
-        "enc_dek": json.loads(row["enc_dek"]), # parse JSON dict
+        "file": enc_file_dict,
+        "enc_dek": json.loads(row["enc_dek"]),
         "kek_salt": row["kek_salt"]
     }
 
-    return decrypt_file_at_rest(record)
+    plaintext_bytes = decrypt_file_at_rest(record)
+    file_signature = row["file_signature"]
+    return plaintext_bytes, file_signature
 
 def get_all_records():
-    db = get_db()  # get a connection from the pool
+    db = get_db()
     try:
         with db.cursor(dictionary=True) as cur:
             cur.execute("SELECT id, enc_dek, kek_salt FROM encrypted_files")
@@ -75,7 +100,7 @@ def update_record_dek(record_id: int, enc_dek: dict):
     """
     enc_dek: AES dict (ciphertext, nonce, tag)
     """
-    db = get_db()  # get a connection from the pool
+    db = get_db()
     try:
         with db.cursor() as cur:
             cur.execute(

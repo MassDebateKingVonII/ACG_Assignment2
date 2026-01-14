@@ -2,6 +2,8 @@ import socket
 import threading
 import os
 import json
+from cryptography.hazmat.primitives import serialization
+
 from utils.AES_utils import encrypt_message, decrypt_message
 from utils.ECDHE_utils import (
     generate_ecdh_keypair,
@@ -10,8 +12,15 @@ from utils.ECDHE_utils import (
     derive_aes_key
 )
 
+from utils.PKI_utils import generate_root_ca, generate_server_certificate, sign_bytes
+from utils.hash_utils import sha256
+
 from server.model.fileModel import store_file, list_files, load_file
 from server.utils.rotateMEK import rotate_master_key
+
+# 1. Generate / load CA and server cert
+root_key, root_cert = generate_root_ca()
+server_key, server_cert = generate_server_certificate(root_key, root_cert)
 
 HOST = '127.0.0.1'
 PORT = 5001
@@ -23,22 +32,36 @@ server_socket = None
 
 # ---------------- HANDSHAKE ----------------
 def perform_handshake(conn):
+    # Generate ephemeral ECDHE key
     priv, pub = generate_ecdh_keypair()
-
-    length = int.from_bytes(conn.recv(4), 'big')
-    client_pub = deserialize_public_key(conn.recv(length))
-
     pub_bytes = serialize_public_key(pub)
-    conn.send(len(pub_bytes).to_bytes(4, 'big'))
+
+    # Sign ephemeral key
+    signature = sign_bytes(server_key, pub_bytes)
+
+    # Send server certificate, ephemeral key, signature
+    cert_bytes = server_cert.public_bytes(serialization.Encoding.PEM)
+    conn.send(len(cert_bytes).to_bytes(4, "big"))
+    conn.send(cert_bytes)
+
+    conn.send(len(pub_bytes).to_bytes(4, "big"))
     conn.send(pub_bytes)
 
+    conn.send(len(signature).to_bytes(4, "big"))
+    conn.send(signature)
+
+    # Receive client ephemeral key
+    length = int.from_bytes(conn.recv(4), "big")
+    client_pub = deserialize_public_key(conn.recv(length))
+
+    # Derive AES session key
     aes_key = derive_aes_key(priv, client_pub)
-    print("[+] Session AES key established")
+    print("[+] AES session key established with server authentication")
     return aes_key
 
 # ---------------- SEND FILE ----------------
 def send_file(conn, filename, aes_key):
-    plaintext = load_file(filename)
+    plaintext, file_signature = load_file(filename)
 
     if plaintext is None:
         return False
@@ -48,7 +71,8 @@ def send_file(conn, filename, aes_key):
 
     payload = json.dumps({
         "filename": filename,
-        **enc
+        **enc,
+        "file_signature": file_signature
     }).encode()
 
     conn.send(len(payload).to_bytes(8, 'big'))
@@ -62,9 +86,13 @@ def save_file(payload, aes_key):
     aad = payload["filename"].encode()
     plaintext_bytes = decrypt_message(payload, aes_key, associated_data=aad)
 
-    store_file(payload["filename"], plaintext_bytes)
+    # ---- non-repudiation signing ----
+    file_hash = sha256(plaintext_bytes)
+    signature = sign_bytes(server_key, file_hash)
 
-    print(f"[+] Encrypted file stored: {payload['filename']}")
+    store_file(payload["filename"], plaintext_bytes, signature)
+
+    print(f"[+] Encrypted file stored and signed: {payload['filename']}")
 
 # ---------------- CLIENT HANDLER ----------------
 def handle_client(conn, addr):
