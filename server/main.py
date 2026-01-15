@@ -1,6 +1,5 @@
 import socket
 import threading
-import os
 import json
 from cryptography.hazmat.primitives import serialization
 
@@ -76,6 +75,12 @@ def handle_client(conn, addr):
                 conn.send(len(payload).to_bytes(8, 'big'))
                 conn.send(payload)
 
+                # If no files, skip waiting for filename
+                if not files:
+                    print("[!] No files available for client")
+                    continue  # go back to waiting for next client command
+
+                # There are files, now receive filename
                 fname_len = int.from_bytes(conn.recv(8), 'big')
                 filename = conn.recv(fname_len).decode()
 

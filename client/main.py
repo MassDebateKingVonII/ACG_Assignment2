@@ -10,7 +10,12 @@ from utils.ECDHE_utils import (
     derive_aes_key
 )
 
-from utils.PKI_utils import verify_bytes
+from utils.PKI_utils import (
+    verify_bytes, 
+    verify_certificate_validity, 
+    verify_server_basic_constraints
+)
+
 from utils.hash_utils import sha256
 
 HOST = '127.0.0.1'
@@ -34,6 +39,9 @@ def perform_handshake(sock):
     length = int.from_bytes(sock.recv(4), "big")
     cert_bytes = sock.recv(length)
     server_cert = x509.load_pem_x509_certificate(cert_bytes)
+    
+    verify_certificate_validity(server_cert)
+    verify_server_basic_constraints(server_cert)
 
     # Step 1: Verify that server_cert is signed by trusted root
     try:

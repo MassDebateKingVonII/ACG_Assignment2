@@ -5,6 +5,9 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.x509.oid import NameOID
 
+from datetime import datetime, timedelta, timezone
+now = datetime.now(timezone.utc)
+
 CERT_DIR = os.path.join('server', 'certificates')
 os.makedirs(CERT_DIR, exist_ok=True)
 
@@ -29,8 +32,8 @@ def generate_root_ca():
         .issuer_name(issuer)\
         .public_key(private_key.public_key())\
         .serial_number(x509.random_serial_number())\
-        .not_valid_before(datetime.datetime.utcnow())\
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=3650))\
+        .not_valid_before(now)\
+        .not_valid_after(now + timedelta(days=3650))\
         .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)\
         .sign(private_key, hashes.SHA256())
 
@@ -63,8 +66,8 @@ def generate_server_certificate(root_key, root_cert, common_name="Server"):
         .issuer_name(root_cert.subject)\
         .public_key(private_key.public_key())\
         .serial_number(x509.random_serial_number())\
-        .not_valid_before(datetime.datetime.utcnow())\
-        .not_valid_after(datetime.datetime.utcnow() + datetime.timedelta(days=365))\
+        .not_valid_before(now)\
+        .not_valid_after(now + timedelta(days=365))\
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)\
         .sign(root_key, hashes.SHA256())
 
@@ -79,6 +82,26 @@ def generate_server_certificate(root_key, root_cert, common_name="Server"):
 
     return private_key, cert
 
+def verify_certificate_validity(cert: x509.Certificate) -> None:
+    now = datetime.now(timezone.utc)
+
+    not_before = cert.not_valid_before_utc
+    not_after = cert.not_valid_after_utc
+
+    if now < not_before:
+        raise Exception("Certificate is not valid yet")
+
+    if now > not_after:
+        raise Exception("Certificate has expired")
+    
+def verify_server_basic_constraints(cert: x509.Certificate) -> None:
+    try:
+        ext = cert.extensions.get_extension_for_class(x509.BasicConstraints)
+    except x509.ExtensionNotFound:
+        raise Exception("BasicConstraints extension missing")
+
+    if ext.value.ca:
+        raise Exception("Invalid server certificate: certificate is a CA")
 
 # ---------------- SIGN / VERIFY EPHEMERAL KEYS ----------------
 def sign_bytes(private_key, data: bytes) -> bytes:
