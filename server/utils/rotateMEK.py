@@ -1,4 +1,4 @@
-import os, base64
+import os, json, base64
 
 from server.utils.envelopeEncryption import (
     derive_kek, 
@@ -38,8 +38,13 @@ def rotate_master_key():
         old_kek = derive_kek(salt_bytes)
 
         # Decrypt the old DEK
-        dek = decrypt_dek(record["enc_dek"], old_kek)
-
+        
+        enc_dek_dict = record["enc_dek"]
+        if isinstance(enc_dek_dict, str):
+            enc_dek_dict = json.loads(enc_dek_dict)
+            
+        dek = decrypt_dek(enc_dek_dict, old_kek)
+        
         # Derive new KEK using new MEK
         new_kek = derive_kek(salt_bytes)
 
