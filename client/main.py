@@ -2,6 +2,7 @@ import socket, os, json, base64
 from cryptography import x509
 
 from utils.AES_utils import encrypt_message, decrypt_message
+from cryptography.hazmat.primitives.asymmetric import padding
 from utils.ECDHE_utils import (
     generate_ecdh_keypair,
     serialize_public_key,
@@ -34,30 +35,38 @@ def perform_handshake(sock):
     cert_bytes = sock.recv(length)
     server_cert = x509.load_pem_x509_certificate(cert_bytes)
 
-    # Check issuer against trusted root
-    if server_cert.issuer != root_cert.subject:
-        raise Exception("Server certificate not signed by trusted root CA!")
+    # Step 1: Verify that server_cert is signed by trusted root
+    try:
+        trusted_root_pubkey.verify(
+            server_cert.signature,
+            server_cert.tbs_certificate_bytes,
+            padding.PKCS1v15(),
+            server_cert.signature_hash_algorithm,
+        )
+        print("[+] Server certificate verified against trusted root CA")
+    except Exception as e:
+        raise Exception("Server certificate verification failed!") from e
 
     server_pub_key = server_cert.public_key()
 
-    # Receive ephemeral key + signature
+    # Step 2: Receive ephemeral key + signature
     length = int.from_bytes(sock.recv(4), "big")
     server_ephemeral_bytes = sock.recv(length)
     length = int.from_bytes(sock.recv(4), "big")
     signature = sock.recv(length)
 
-    # Verify signature
+    # Step 3: Verify ephemeral key signature with server public key
     verify_bytes(server_pub_key, server_ephemeral_bytes, signature)
 
     server_ephemeral_pub = deserialize_public_key(server_ephemeral_bytes)
 
-    # Generate client ephemeral key
+    # Step 4: Generate client ephemeral key
     priv, pub = generate_ecdh_keypair()
     pub_bytes = serialize_public_key(pub)
     sock.send(len(pub_bytes).to_bytes(4, "big"))
     sock.send(pub_bytes)
 
-    # Derive AES session key
+    # Step 5: Derive AES session key
     aes_key = derive_aes_key(priv, server_ephemeral_pub)
     print("[+] AES session key established with verified server")
     return aes_key, server_pub_key
