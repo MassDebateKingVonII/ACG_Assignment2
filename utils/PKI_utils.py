@@ -6,7 +6,6 @@ from cryptography.hazmat.primitives.asymmetric import rsa, padding
 from cryptography.x509.oid import NameOID
 
 from datetime import datetime, timedelta, timezone
-now = datetime.now(timezone.utc)
 
 CERT_DIR = os.path.join('server', 'certificates')
 os.makedirs(CERT_DIR, exist_ok=True)
@@ -25,6 +24,9 @@ def generate_root_ca():
         with open(ROOT_CERT_PATH, "rb") as f:
             cert = x509.load_pem_x509_certificate(f.read())
         return private_key, cert
+    
+
+    now = datetime.now(timezone.utc)
 
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Root CA")])
@@ -59,6 +61,8 @@ def generate_server_certificate(root_key, root_cert, common_name="Server"):
             cert = x509.load_pem_x509_certificate(f.read())
         return private_key, cert
 
+    now = datetime.now(timezone.utc)
+    
     private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common_name)])
     cert = x509.CertificateBuilder()\
