@@ -27,15 +27,15 @@ def store_file(filename: str, plaintext_bytes: bytes, signature: bytes):
         with db.cursor() as cur:
             cur.execute("""
                 INSERT INTO encrypted_files
-                (filename, file_nonce, file_tag, enc_dek, kek_salt, file_signature)
+                (filename, file_nonce, file_tag, file_signature, enc_dek, kek_salt)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 filename,
                 enc_data["file"]["nonce"],         # store nonce
                 enc_data["file"]["tag"],           # store GCM tag
-                json.dumps(enc_data["enc_dek"]),  # AES dict
-                enc_data["kek_salt"],             # base64 string
                 signature_b64,                     # file signature
+                json.dumps(enc_data["enc_dek"]),  # AES dict
+                enc_data["kek_salt"]              # base64 string
             ))
     finally:
         db.close()
