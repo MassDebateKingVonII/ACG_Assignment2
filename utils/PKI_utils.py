@@ -107,7 +107,7 @@ def verify_server_basic_constraints(cert: x509.Certificate) -> None:
     if ext.value.ca:
         raise Exception("Invalid server certificate: certificate is a CA")
 
-# ---------------- SIGN / VERIFY EPHEMERAL KEYS ----------------
+# ---------------- SIGN / VERIFY EPHEMERAL KEYS AND FILES ----------------
 def sign_bytes(private_key, data: bytes) -> bytes:
     return private_key.sign(
         data,
