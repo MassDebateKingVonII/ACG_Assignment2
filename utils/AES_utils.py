@@ -15,6 +15,9 @@ def encrypt_message(plaintext: bytes, key, associated_data: bytes = b""):
     try:
         if isinstance(key, str):
             key = base64.b64decode(key)
+            
+        if len(key) != 32:  # 256 bits = 32 bytes
+            raise ValueError("Key must be 256 bits (32 bytes)")
 
         nonce = os.urandom(12)
 
@@ -49,6 +52,9 @@ def decrypt_message(enc_dict, key, associated_data: bytes = b"") -> bytes:
     try:
         if isinstance(key, str):
             key = base64.b64decode(key)
+            
+        if len(key) != 32:  # 256 bits = 32 bytes
+            raise ValueError("Key must be 256 bits (32 bytes)")
 
         ciphertext = base64.b64decode(enc_dict["ciphertext"])
         nonce = base64.b64decode(enc_dict["nonce"])
